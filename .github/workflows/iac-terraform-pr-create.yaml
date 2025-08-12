@@ -108,7 +108,7 @@ jobs:
         with:
           repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
           ref: "${{ github.event.client_payload.branch || inputs.branch }}"
-          token: ${{ secrets.MY_GITHUB_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -135,7 +135,7 @@ jobs:
         with:
           repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
           ref: "${{ github.event.client_payload.branch || inputs.branch }}"
-          token: ${{ secrets.MY_GITHUB_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -522,3 +522,4 @@ jobs:
   #           -p /target/tfplan.json \
 
   #           -f /target/features
+
