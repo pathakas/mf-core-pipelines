@@ -1,0 +1,570 @@
+name: Central Terraform IaC Pipline - PR Merge
+run-name: terraform-iac-pr-apply:${{ github.event.client_payload.triggered_by || inputs.triggered_by || 'Unknown repo' }} > ${{ github.event.client_payload.branch || inputs.branch || 'Unknown branch' }} > ${{ github.event.client_payload.pr_number || inputs.pr_number || 'Unknown PR' }}
+
+
+permissions:
+  contents: write
+  id-token: write
+  pull-requests: read
+
+on:
+  repository_dispatch:
+    types: [terraform-iac-pr-apply]
+  workflow_call:
+    inputs:
+      triggered_by:
+        required: true
+        type: string
+        description: The repo that triggered the workflow
+      pr_event:
+        required: true
+        type: string
+        description: The pull request event
+      pr_event_action:
+        required: true
+        type: string
+        description: The pull request event action
+      pr_event_name:
+        required: true
+        type: string
+        description: The pull request event name
+      run_id:
+        required: true
+        type: string
+        description: The run ID of the workflow
+      pr_number:
+        required: true
+        type: string
+        description: The pull request number
+      commit_sha:
+        required: true
+        type: string
+        description: The commit SHA that triggered the workflow
+      branch:
+        required: true
+        type: string
+        description: The branch that triggered the workflow
+      checkov_skip_checks:
+        required: true
+        type: string
+        description: Comma separated list of Checkov skip checks without any spaces
+  workflow_dispatch:
+
+jobs:
+  pipeline-trigger-information:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Information
+        if: ${{ github.event_name == 'repository_dispatch' }}
+        run: |
+          echo "### This pipeline trigger summary " >> $GITHUB_STEP_SUMMARY
+          echo "I was triggered by ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+ 
+          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            echo "Triggered by: ${{ github.event.client_payload.triggered_by || inputs.triggered_by }}" >> $GITHUB_STEP_SUMMARY
+            echo 'Repository Dispatch payload:' >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+ 
+            jq -n \
+              --arg triggered_by "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}" \
+              --arg pr_event "${{ github.event.client_payload.pr_event || inputs.pr_event }}" \
+              --arg pr_event_action "${{ github.event.client_payload.pr_event_action || inputs.pr_event_action }}" \
+              --arg pr_event_name "${{ github.event.client_payload.pr_event_name || inputs.pr_event_name }}" \
+              --arg run_id "${{ github.event.client_payload.run_id || inputs.run_id }}" \
+              --arg pr_number "${{ github.event.client_payload.pr_number || inputs.pr_number }}" \
+              --arg commit_sha "${{ github.event.client_payload.commit_sha || inputs.commit_sha }}" \
+              --arg branch "${{ github.event.client_payload.branch || inputs.branch }}" \
+              '{
+                triggered_by: $triggered_by,
+                pr_event: $pr_event,
+                pr_event_action: $pr_event_action,
+                pr_event_name: $pr_event_name,
+                run_id: $run_id,
+                pr_number: $pr_number,
+                commit_sha: $commit_sha,
+                branch: $branch
+              }' >> $GITHUB_STEP_SUMMARY
+ 
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "Manual trigger" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Add caller run info to summary
+        if: ${{ github.event_name == 'repository_dispatch' }}
+        run: |
+          echo "?? [View Triggerring Pipeline Run](https://github.com/${{ github.event.client_payload.triggered_by || inputs.triggered_by }}/actions/runs/${{ github.event.client_payload.run_id || inputs.run_id }})" >> $GITHUB_STEP_SUMMARY
+
+  terraform-init:
+    name: Terraform Init
+    runs-on: ubuntu-latest
+    needs: pipeline-trigger-information
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
+          ref: "${{ github.event.client_payload.branch || inputs.branch }}"
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: List files
+        run: ls -lrt
+
+      - name: Terraform Init
+        run: terraform init
+  
+  terraform-format:
+    name: Terraform Format
+    runs-on: ubuntu-latest
+    needs: terraform-init
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
+          ref: "${{ github.event.client_payload.branch || inputs.branch }}"
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: List files
+        run: ls -lrt
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Format
+        run: terraform fmt -check -recursive
+
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    needs: terraform-init
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
+          ref: "${{ github.event.client_payload.branch || inputs.branch }}"
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+  terraform-docs:
+    name: Terraform documentation generation
+    runs-on: ubuntu-latest
+    needs: terraform-init
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      AAD_CLIENT_SECRET: ${{ secrets.AAD_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
+          ref: "${{ github.event.client_payload.branch || inputs.branch }}"
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Render terraform docs inside the README.md and push changes back to PR branch
+        uses: terraform-docs/gh-actions@v1.0.0
+        with:
+          find-dir: .
+          output-file: README.md
+          output-method: inject
+          git-push: 'true'
+          # github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  terraform-tfsec:
+    name: Terraform TfSec Scanning
+    runs-on: ubuntu-latest
+    needs: terraform-init
+    # environment: production
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      AAD_CLIENT_SECRET: ${{ secrets.AAD_CLIENT_SECRET }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
+          ref: "${{ github.event.client_payload.branch || inputs.branch }}"
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init 
+        
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.0
+
+  terraform-checkov:
+    name: Terraform Checkov Scanning
+    runs-on: ubuntu-latest
+    needs: terraform-init
+    # environment: production
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      AAD_CLIENT_SECRET: ${{ secrets.AAD_CLIENT_SECRET }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
+          ref: "${{ github.event.client_payload.branch || inputs.branch }}"
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init 
+        
+      # - name: Run Checkov
+      #   uses: bridgecrewio/checkov-action@v12
+      #   with:
+      #     directory: .
+      #     framework: terraform
+
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs:
+      - terraform-format
+      - terraform-validate
+      - terraform-tfsec
+      - terraform-checkov
+      - terraform-docs
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      AAD_CLIENT_SECRET: ${{ secrets.AAD_CLIENT_SECRET }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
+          ref: "${{ github.event.client_payload.branch || inputs.branch }}"
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init      
+              
+      - name: Terraform Plan                
+        run: terraform plan -out=plan.out -var "cfg_aad_client_secret=${{ secrets.AAD_CLIENT_SECRET }}"
+
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: plan.out
+
+      - name: Convert plan to JSON
+        run: terraform show -json plan.out > tfplan.json
+
+      - name: Set output if plan has changes
+        id: plan_status
+        run: |
+          echo "plan_has_changes=$(jq -r '.applyable' tfplan.json)">> $GITHUB_OUTPUT
+          echo $GITHUB_OUTPUT
+    outputs:
+      plan_has_changes: ${{ steps.plan_status.outputs.plan_has_changes }}
+
+  nochanges:
+    name: No plan changes
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: needs.terraform-plan.outputs.plan_has_changes == 'false'
+    steps:
+      - name: No Changes
+        run: |
+          echo "No changes to the Terraform plan"
+
+  checkov:
+    name: checkov Plan
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: needs.terraform-plan.outputs.plan_has_changes == 'true'
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      AAD_CLIENT_SECRET: ${{ secrets.AAD_CLIENT_SECRET }}
+    
+    steps:
+      - name: Check output
+        run: |
+          echo "plan_has_changes=${{ needs.terraform-plan.outputs.plan_has_changes }}"
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
+          ref: "${{ github.event.client_payload.branch || inputs.branch }}"
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+  
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init 
+
+      - name: Download plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: .
+
+      - name: Convert to JSON
+        run: terraform show -json plan.out > tfplan.json
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          file: tfplan.json
+          skip_check: ${{ github.event.client_payload.checkov_skip_checks || inputs.checkov_skip_checks }}
+
+  compliance:
+    name: Terraform Compliance
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: needs.terraform-plan.outputs.plan_has_changes == 'true'
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      AAD_CLIENT_SECRET: ${{ secrets.AAD_CLIENT_SECRET }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
+          ref: "${{ github.event.client_payload.branch || inputs.branch }}"
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init 
+
+      - name: Download plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: .
+
+      - name: Convert to JSON
+        run: terraform show -json plan.out > tfplan.json
+
+      - name: Install terraform-compliance
+        run: |
+          pip install terraform-compliance
+
+      # - name: Run terraform-compliance
+      #   run: terraform-compliance -p tfplan.json -f features/
+
+  terratest:
+    name: Terratest
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: needs.terraform-plan.outputs.plan_has_changes == 'true'
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      AAD_CLIENT_SECRET: ${{ secrets.AAD_CLIENT_SECRET }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.client_payload.triggered_by || inputs.triggered_by }}"
+          ref: "${{ github.event.client_payload.branch || inputs.branch }}"
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init 
+      
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          enable-AzPSSession: true
+
+      # - name: Run Terratest
+      #   run: |
+      #     cd terratest
+      #     go mod tidy
+      #     go test -v -tags="azure azureslim network" -timeout 30m
+      #   env:
+      #     ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    environment: production
+    needs: [compliance, terratest, checkov, terraform-plan]
+    if: needs.terraform-plan.outputs.plan_has_changes == 'true'
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      AAD_CLIENT_SECRET: ${{ secrets.AAD_CLIENT_SECRET }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.client_payload.triggered_by }}"
+          ref: "${{ github.event.client_payload.branch }}"
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          enable-AzPSSession: true
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: .
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve plan.out
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+
+  # compliance:
+  #   runs-on: ubuntu-latest
+
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+
+  #     - name: Install dependencies
+  #       run: |
+  #         sudo apt-get install jq curl
+
+  #     - name: Fetch plan JSON from TFC
+  #       env:
+  #         TFC_TOKEN: ${{ secrets.TF_API_TOKEN }}
+  #         TFC_ORG: SivajiRaavi
+  #         TFC_WORKSPACE: azure-recovery-services-vault-dev
+  #       run: |
+  #         # Get workspace ID
+  #         WORKSPACE_ID=$(curl -s \
+  #           --header "Authorization: Bearer $TFC_TOKEN" \
+  #           https://app.terraform.io/api/v2/organizations/$TFC_ORG/workspaces/$TFC_WORKSPACE \
+  #           | jq -r '.data.id')
+
+  #         # Get latest run ID
+  #         RUN_ID=$(curl -s \
+  #           --header "Authorization: Bearer $TFC_TOKEN" \
+  #           https://app.terraform.io/api/v2/workspaces/$WORKSPACE_ID/runs \
+  #           | jq -r '.data[0].id')
+
+  #         # Get plan ID
+  #         PLAN_ID=$(curl -s \
+  #           --header "Authorization: Bearer $TFC_TOKEN" \
+  #           https://app.terraform.io/api/v2/runs/$RUN_ID \
+  #           | jq -r '.data.relationships.plan.data.id')
+
+  #         # Get the JSON plan download URL
+  #         PLAN_JSON_URL=$(curl -s \
+  #           --header "Authorization: Bearer $TFC_TOKEN" \
+  #           https://app.terraform.io/api/v2/plans/$PLAN_ID/json-output \
+  #           | jq -r '.data.attributes."hosted-json-url"')
+
+  #         # Download JSON plan
+  #         curl -s -H "Authorization: Bearer $TFC_TOKEN" "$PLAN_JSON_URL" -o tfplan.json
+
+  #     - name: Run terraform-compliance
+  #       run: |
+  #         docker run --rm \
+  #           -v ${{ github.workspace }}:/target \
+  #           eerkunt/terraform-compliance \
+  #           -p /target/tfplan.json \
+  #           -f /target/features
